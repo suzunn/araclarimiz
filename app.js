@@ -413,8 +413,11 @@ function kapat(geriTusuyla = false) {
 }
 window.addEventListener("popstate", () => kapat(true));
 
+// Uzun yazı tek satırlık kutuda kesilmesin: düz yazı alanı uzunsa iki satırlık kutu olur
 const alan = (etiket, ad, deger, ek = "") =>
-  `<label class="alan">${etiket}<input name="${ad}" value="${esc(deger ?? "")}" ${ek}></label>`;
+  !/type=/.test(ek) && !/inputmode/.test(ek) && String(deger ?? "").length > 16
+    ? `<label class="alan">${etiket}<textarea name="${ad}" rows="2" class="kisa" ${ek.replace(/autofocus/, "")}>${esc(deger)}</textarea></label>`
+    : `<label class="alan">${etiket}<input name="${ad}" value="${esc(deger ?? "")}" ${ek}></label>`;
 const tarihAlani = (etiket, ad, deger) => alan(etiket, ad, deger, 'type="date"');
 const sayiAlani = (etiket, ad, deger, ek = "") => alan(etiket, ad, deger ?? "", `inputmode="decimal" ${ek}`);
 const notAlani = (deger) => `<label class="alan">Not<textarea name="not">${esc(deger ?? "")}</textarea></label>`;
@@ -524,7 +527,7 @@ function eksikGirPenceresi(a, k) {
 function aralikMetni(k) {
   const p = [];
   if (k.aralikKm) p.push(`${sayi(k.aralikKm)} km'de`);
-  if (k.aralikAy) p.push(k.aralikAy % 12 === 0 ? `${k.aralikAy / 12} yılda` : `${k.aralikAy} ayda`);
+  if (k.aralikAy) p.push(k.aralikAy === 1 ? "ay" : k.aralikAy % 12 === 0 ? `${k.aralikAy / 12} yılda` : `${k.aralikAy} ayda`);
   if (k.aralikGun) p.push(k.aralikGun === 7 ? "haftada" : `${k.aralikGun} günde`);
   return p.length ? "Her " + p.join(" ya da ") + " bir" : "";
 }
@@ -844,7 +847,7 @@ function arizaOnizlemePenceresi(a, ai, anlatim, fotolar) {
   const sorunId = yeniId();
   const fotoIdleri = [];
   pencere("Yapay zeka şöyle anladı", `
-    <label class="alan">Başlık<input name="baslik" value="${esc(ai.baslik)}" data-baslik></label>
+    <label class="alan">Başlık<textarea name="baslik" rows="2" class="kisa" data-baslik>${esc(ai.baslik)}</textarea></label>
     <label class="alan">Ne kadar acil?<select data-aciliyet>${Object.entries(ACILIYET).map(([d, ad]) => `<option value="${d}" ${d === ai.aciliyet ? "selected" : ""}>${ad}</option>`).join("")}</select></label>
     ${aiOzeti(ai)}
     ${fotolar.length ? `<div class="fotolar">${fotolar.map((f) => `<img src="${f}" alt="">`).join("")}</div>` : ""}
@@ -871,6 +874,30 @@ function arizaOnizlemePenceresi(a, ai, anlatim, fotolar) {
         b.textContent = "✓ Ekle, herkes görsün";
         bilgi(hata.message);
       }
+    };
+  });
+}
+
+function cozulduPenceresi(a, k) {
+  if (!k) return;
+  pencere(`Çözüldü: ${k.ad}`, `<form>
+    ${tarihAlani("Ne zaman", "tarih", bugunISO())}
+    ${sayiAlani('Tutar <small>(TL, isteğe bağlı)</small>', "tutar", "")}
+    ${notAlani("")}
+    <button class="dugme buyuk genis" style="margin-top:16px">Kaydet</button>
+  </form>`, (p) => {
+    p.querySelector("form").onsubmit = (e) => {
+      e.preventDefault();
+      const v = formVerisi(e.target);
+      const tarih = v.tarih || bugunISO();
+      const kayitId = yeniId();
+      kaydet([
+        { op: "kaydet", koleksiyon: "kalemler", oge: { id: k.id, cozuldu: tarih } },
+        { op: "kaydet", koleksiyon: "kayitlar", oge: { id: kayitId, aracId: a.id, kalemId: k.id, tur: "tamir", tarih, baslik: `Çözüldü: ${k.ad}`, tutar: sayiOku(v.tutar), not: v.not.trim() || null, kim } },
+      ], "Sorun kapatıldı", () => kaydet([
+        { op: "kaydet", koleksiyon: "kalemler", oge: { id: k.id, cozuldu: null } },
+        { op: "sil", koleksiyon: "kayitlar", id: kayitId },
+      ], "Geri alındı"));
     };
   });
 }
