@@ -243,3 +243,4 @@ legend { font-weight: 800; font-size: 15px; color: var(--soluk); padding: 0 6px;
 .bant-dugmeler { display: flex; flex-direction: column; align-items: center; }
 .bant-dugmeler .metin-dugme { padding: 6px 10px; width: auto; color: #2b2100; font-size: 16px; }
 .foto-kutu.isleniyor { display: grid; place-items: center; aspect-ratio: 1; border-radius: 12px; background: var(--zemin); font-size: 14px; color: var(--soluk); }
+.soru-metin { font-size: 21px; font-weight: 800; margin: 4px 0 6px; line-height: 1.3; }

@@ -225,7 +225,7 @@ function ciz() {
   kok.querySelectorAll("[data-kalem]").forEach((b) => (b.onclick = () => kalemPenceresi(a, b.dataset.kalem)));
   kok.querySelectorAll("[data-yap]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); yapildiPenceresi(a, bul(b.dataset.yap)); }));
   kok.querySelectorAll("[data-coz]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); cozulduPenceresi(a, bul(b.dataset.coz)); }));
-  kok.querySelectorAll("[data-gir]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); kalemDuzenlePenceresi(a, bul(b.dataset.gir)); }));
+  kok.querySelectorAll("[data-gir]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); eksikGirPenceresi(a, bul(b.dataset.gir)); }));
   kok.querySelectorAll("[data-kayit]").forEach((b) => (b.onclick = () => kayitPenceresi(a, b.dataset.kayit)));
 }
 
@@ -333,7 +333,7 @@ function aracEkrani(a) {
 
     ${eksik.length ? `<section>
       <h2>Bilgisi eksik (${eksik.length}) <small>bilen girsin</small></h2>
-      ${eksik.map(({ k }) => isKarti("eksik", k, "Tarih / km girilmedi", `<button class="is-dugme" data-gir="${esc(k.id)}">Gir</button>`)).join("")}
+      ${eksik.map(({ k, d }) => isKarti("eksik", k, eksikSorusu(k, d), `<button class="is-dugme" data-gir="${esc(k.id)}">Gir</button>`)).join("")}
     </section>` : ""}
 
     <section>
@@ -475,6 +475,48 @@ function kmPenceresi(a) {
       if (km.sonKm && deger < km.sonKm && v.tarih >= km.sonTarih && !confirm(`Son girilen km ${sayi(km.sonKm)}. Daha düşük bir km yazdın, yine de kaydedilsin mi?`)) return;
       if (km.tahmini && deger > km.tahmini + 20000 && !confirm(`${sayi(deger)} km, beklenenden çok yüksek (tahmin ~${sayi(km.tahmini)}). Doğru mu?`)) return;
       kaydet([{ op: "kaydet", koleksiyon: "kmKayitlari", oge: { id: yeniId(), aracId: a.id, tarih: v.tarih || bugunISO(), km: deger, kim } }], "Km kaydedildi");
+    };
+  });
+}
+
+// Eksik kartında "ne eksik" sorusu
+function eksikSorusu(k, d) {
+  if (k.sonrakiKm) return d.metin; // kontrolün km'si belli, aracın km'si girilmemiş
+  if (k.soru) return k.soru;
+  if (k.aralikKm) return "En son kaçıncı km'de yapıldı?";
+  if (k.aralikAy || k.aralikGun) return "En son ne zaman yapıldı?";
+  return "Bir sonraki ne zaman?";
+}
+
+// Tek soruluk basit pencere: annem de rahat girebilsin
+function eksikGirPenceresi(a, k) {
+  if (!k) return;
+  if (k.sonrakiKm && !kmBilgisi(durum, a.id).sonKm) return kmPenceresi(a);
+  const sonraki = k.sor === "sonraki" || (!k.aralikKm && !k.aralikAy && !k.aralikGun);
+  const kmOnce = !sonraki && k.aralikKm;
+  pencere(k.ad, `<form>
+    <p class="soru-metin">${esc(eksikSorusu(k, {}))}</p>
+    ${sonraki ? tarihAlani("Tarih", "tarih", "")
+      : kmOnce ? sayiAlani("Kaçıncı km'de?", "km", "", 'placeholder="ör. 120.000"') + tarihAlani('Ne zaman? <small>(biliyorsan)</small>', "tarih", "")
+      : tarihAlani("Ne zaman?", "tarih", "") + sayiAlani('Kaçıncı km\'de? <small>(biliyorsan)</small>', "km", "")}
+    ${k.not ? `<p class="aciklama" style="margin-top:10px">${esc(k.not)}</p>` : ""}
+    <button class="dugme buyuk genis" style="margin-top:16px">Kaydet</button>
+    <button type="button" class="metin-dugme" data-ayar style="text-align:center">Diğer ayarlar</button>
+  </form>`, (p) => {
+    p.querySelector("[data-ayar]").onclick = () => kalemDuzenlePenceresi(a, k);
+    p.querySelector("form").onsubmit = (e) => {
+      e.preventDefault();
+      const v = formVerisi(e.target);
+      const km = sayiOku(v.km);
+      let oge;
+      if (sonraki) {
+        if (!v.tarih) return bilgi("Tarihi seç");
+        oge = { id: k.id, sonrakiTarih: v.tarih };
+      } else {
+        if (kmOnce ? !km : !v.tarih) return bilgi(kmOnce ? "Km'yi yaz" : "Tarihi seç");
+        oge = { id: k.id, sonTarih: v.tarih || null, sonKm: km, ...sonrakiHesapla(k, v.tarih, km) };
+      }
+      kaydet([{ op: "kaydet", koleksiyon: "kalemler", oge }], `${k.ad} kaydedildi`);
     };
   });
 }
