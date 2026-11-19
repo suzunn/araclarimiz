@@ -1,4 +1,4 @@
-const SURUM = "arac-v2";
+const SURUM = "arac-v3";
 // Yollar sw.js'in klasörüne göre (GitHub Pages'te /araclarimiz/)
 const KOK = self.registration.scope;
 const KABUK = ["./", "app.js", "hesap.js", "style.css", "manifest.webmanifest", "ikon/192.png", "ikon/rozet.png"];
@@ -20,7 +20,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin || !url.href.startsWith(KOK)) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" }) // GitHub Pages 10 dk önbellekliyor: yeni sürüm hemen gelsin
       .then((cevap) => {
         if (cevap.ok) {
           const kopya = cevap.clone();

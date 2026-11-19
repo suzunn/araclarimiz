@@ -86,6 +86,9 @@ export function kalemDurum(kalem, km, bugun = bugunISO()) {
       enYakinGun = Math.min(enYakinGun, -1);
     }
     parcalar.push(metin);
+  } else if (kalem.sonrakiKm && !kalem.sonrakiTarih) {
+    // Aracın km'si hiç girilmemiş: ne kadar kaldığı bilinemez
+    return { ...sonuc, seviye: "eksik", metin: `${sayi(kalem.sonrakiKm)} km'de · aracın km'si girilmedi`, sira: 2e6 };
   } else if (kalem.sonrakiKm) {
     parcalar.push(`${sayi(kalem.sonrakiKm)} km'de`);
   }
