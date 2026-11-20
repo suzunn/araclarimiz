@@ -891,7 +891,22 @@ const BELGE_TURLERI = [
   { id: "garanti", ad: "Garanti belgeleri", ikon: "📜", ne: "Akü, lastik vb." },
   { id: "diger", ad: "Diğer belgeler", ikon: "📎", ne: "Satış sözleşmesi, ekspertiz, ceza makbuzu…" },
 ];
+const PDF_SINIR = 3_500_000; // base64 + JSON ile Netlify'ın 6 MB istek sınırının altında kalsın
+
+// İstek önbelleği: aynı dosya iki kez indirilmesin, hafıza şişmesin (en fazla 12 dosya)
 const belgeOnbellek = new Map();
+function belgeGetir(id) {
+  if (!belgeOnbellek.has(id)) {
+    const istek = api("belge?id=" + encodeURIComponent(id), null, 45000).then((v) => v.veri);
+    istek.catch(() => belgeOnbellek.delete(id));
+    belgeOnbellek.set(id, istek);
+    while (belgeOnbellek.size > 12) belgeOnbellek.delete(belgeOnbellek.keys().next().value);
+  }
+  return belgeOnbellek.get(id);
+}
+const belgeVerisi = (b) => belgeGetir(b.id);
+// Küçük resim yüklemede ayrıca saklanıyor (kimlik + "k"); eski yüklemelerde yoksa asıl dosya
+const kucukResim = (b) => (b.kucuk ? belgeGetir(b.id + "k") : belgeGetir(b.id));
 
 const aracBelgeleri = (aracId, tur) =>
   aktifler(durum.belgeler).filter((b) => b.aracId === aracId && (!tur || b.tur === tur)).sort((x, y) => (y.tarih || "").localeCompare(x.tarih || ""));
@@ -899,8 +914,7 @@ const aracBelgeleri = (aracId, tur) =>
 function belgelerBolumu(a) {
   const satirlar = BELGE_TURLERI.map((t) => {
     const liste = aracBelgeleri(a.id, t.id);
-    const eksik = t.gerekli && !liste.length;
-    return { t, liste, eksik };
+    return { t, liste, eksik: t.gerekli && !liste.length };
   });
   const eksikSayi = satirlar.filter((s) => s.eksik).length;
   return `<section>
@@ -914,20 +928,16 @@ function belgelerBolumu(a) {
   </section>`;
 }
 
-async function belgeVerisi(b) {
-  if (!belgeOnbellek.has(b.id)) belgeOnbellek.set(b.id, (await api("belge?id=" + encodeURIComponent(b.id), null, 45000)).veri);
-  return belgeOnbellek.get(b.id);
-}
-
 function belgeDosyaAdi(a, b) {
   const tur = BELGE_TURLERI.find((t) => t.id === b.tur);
   const temiz = (s) => String(s || "").replace(/[^\p{L}\p{N} _-]/gu, "").trim().replace(/\s+/g, "-");
-  return `${temiz(a.ad)}-${temiz(b.ad || tur?.ad || "belge")}-${b.tarih || ""}.${b.dosya === "application/pdf" ? "pdf" : "jpg"}`;
+  const uzanti = { "application/pdf": "pdf", "image/png": "png", "image/webp": "webp" }[b.dosya] || "jpg";
+  return `${temiz(a.ad)}-${temiz(b.ad || tur?.ad || "belge")}-${b.tarih || ""}.${uzanti}`;
 }
 
 async function belgeIndir(a, b) {
   try {
-    bilgi("İndiriliyor…");
+    bilgi("Hazırlanıyor…");
     const blob = await (await fetch(await belgeVerisi(b))).blob();
     const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement("a"), { href: url, download: belgeDosyaAdi(a, b) });
@@ -935,61 +945,98 @@ async function belgeIndir(a, b) {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    bilgi("İndirildi: telefonun İndirilenler klasöründe");
+    bilgi("İndirme başladı: telefonun İndirilenler klasörüne");
   } catch (e) {
     bilgi(e.message);
   }
 }
 
+// Belge fotoğrafı: yazılar okunsun diye genişlik 1600'e, toplam 8 milyon piksele kadar; şeffaf yerler beyaz
+async function belgeResmi(dosya) {
+  let bmp;
+  try { bmp = await createImageBitmap(dosya); } catch { throw new Error("Bu fotoğraf açılamadı. Kameradan yeniden çek ya da ekran görüntüsü al."); }
+  const ciz = (enFazlaGen, kalite) => {
+    const oran = Math.min(1, enFazlaGen / bmp.width, Math.sqrt(8e6 / (bmp.width * bmp.height)));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(bmp.width * oran));
+    c.height = Math.max(1, Math.round(bmp.height * oran));
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", kalite);
+  };
+  const buyuk = ciz(1600, 0.88);
+  const kucuk = ciz(240, 0.7);
+  bmp.close?.();
+  return { buyuk, kucuk };
+}
+
+const dosyaOku = (dosya) => new Promise((ok, hata) => {
+  const r = new FileReader();
+  r.onload = () => ok(r.result);
+  r.onerror = () => hata(new Error("Dosya okunamadı"));
+  r.readAsDataURL(dosya);
+});
+
 function belgeGosterPenceresi(a, b) {
   const tur = BELGE_TURLERI.find((t) => t.id === b.tur);
+  const pdf = b.dosya === "application/pdf";
   pencere(b.ad || tur?.ad || "Belge", `
     <p class="aciklama">${esc([tarihYaz(b.tarih), b.kim].filter(Boolean).join(" · "))}</p>
-    <div class="belge-buyuk" data-gorunum><p class="aciklama">Yükleniyor…</p></div>
-    <button class="dugme buyuk genis" data-indir style="margin-top:12px">⬇ Telefona indir</button>
+    <div class="belge-buyuk" data-gorunum>${pdf ? `<div class="pdf-kutu">📄 PDF belgesi<br><small>İndirince telefonun PDF okuyucusuyla açabilirsin</small></div>` : '<p class="aciklama">Yükleniyor…</p>'}</div>
+    <button class="dugme buyuk genis" data-indir style="margin-top:12px">⬇ ${pdf ? "İndir ve aç" : "Telefona indir"}</button>
     <button class="dugme ikincil genis" data-geri style="margin-top:10px">Geri</button>`, async (p) => {
     p.querySelector("[data-indir]").onclick = () => belgeIndir(a, b);
     p.querySelector("[data-geri]").onclick = () => belgeTurPenceresi(a, b.tur);
+    if (pdf) return;
     try {
       const veri = await belgeVerisi(b);
       const kutu = p.querySelector("[data-gorunum]");
       if (!kutu?.isConnected) return;
-      if (b.dosya === "application/pdf") {
-        kutu.innerHTML = `<div class="pdf-kutu">📄 PDF belgesi<br><button class="dugme ikincil" data-ac style="margin-top:12px">Aç</button></div>`;
-        kutu.querySelector("[data-ac]").onclick = async () => {
-          const url = URL.createObjectURL(await (await fetch(veri)).blob());
-          window.open(url, "_blank") || belgeIndir(a, b);
-        };
-      } else {
-        kutu.innerHTML = "";
-        const img = new Image();
-        img.alt = b.ad || "Belge";
-        img.src = veri;
-        kutu.append(img);
-      }
+      kutu.innerHTML = "";
+      const img = new Image();
+      img.alt = b.ad || "Belge";
+      img.src = veri;
+      kutu.append(img);
     } catch (e) {
       bilgi(e.message);
     }
   });
 }
 
+// Kaydı yazılamayan yüklemeler: dosya sunucuda, sadece listeye eklenmesi kaldı
+const bekleyenBelgeler = [];
+
+async function belgeKayitlariniYaz() {
+  while (bekliyor) await new Promise((ok) => setTimeout(ok, 200)); // başka bir kayıt bitsin
+  const yazilacak = bekleyenBelgeler.splice(0);
+  if (!yazilacak.length) return true;
+  const tamam = await kaydet(yazilacak.map((oge) => ({ op: "kaydet", koleksiyon: "belgeler", oge })), `${yazilacak.length} belge yüklendi`, null, false);
+  if (!tamam) bekleyenBelgeler.push(...yazilacak);
+  return tamam;
+}
+
 function belgeTurPenceresi(a, turId) {
   const tur = BELGE_TURLERI.find((t) => t.id === turId) || BELGE_TURLERI.at(-1);
   const liste = aracBelgeleri(a.id, tur.id);
-  pencere(`${a.ad}: ${tur.ad}`, `
+  const bekleyen = bekleyenBelgeler.filter((b) => b.aracId === a.id && b.tur === tur.id).length;
+  const p = pencere(`${a.ad}: ${tur.ad}`, `
     <p class="aciklama">${esc(tur.ne)}</p>
     <div class="belge-liste">${liste.map((b) => `<div class="belge-oge">
       <button class="belge-onizleme" data-goster="${esc(b.id)}" aria-label="Göster">${b.dosya === "application/pdf" ? "📄" : `<img alt="" data-kucuk="${esc(b.id)}">`}</button>
       <div class="belge-bilgi"><b>${esc(b.ad || tur.ad)}</b><span>${esc([tarihYaz(b.tarih), b.kim].filter(Boolean).join(" · "))}</span>
         <div class="belge-dugmeler"><button class="dugme ikincil" data-goster="${esc(b.id)}">Göster</button><button class="dugme ikincil" data-indir="${esc(b.id)}">⬇ İndir</button><button class="metin-dugme sil" data-sil="${esc(b.id)}">Sil</button></div>
       </div></div>`).join("") || '<p class="aciklama">Henüz yüklenmedi.</p>'}</div>
+    ${bekleyen ? `<button class="dugme kirmizi genis" data-tekrar style="margin-top:10px">${bekleyen} dosya listeye eklenemedi · Tekrar dene</button>` : ""}
     <fieldset><legend>Yeni yükle</legend>
-      ${alan('Ne yüklüyorsun? <small>(isteğe bağlı)</small>', "etiket", "", `placeholder="ör. ${tur.id === "ruhsat" ? "Ruhsat ön yüz" : tur.ad + " 2026"}" data-etiket`)}
-      <label class="dugme buyuk genis dosya-dugme" style="margin-top:12px">📷 Fotoğraf çek / dosya seç
+      ${alan('Ne yüklüyorsun? <small>(isteğe bağlı)</small>', "etiket", "", `placeholder="ör. ${tur.id === "ruhsat" ? "Ruhsat ön yüz" : tur.ad + " " + bugunISO().slice(0, 4)}" data-etiket`)}
+      <label class="dugme buyuk genis dosya-dugme" data-sec style="margin-top:12px">📷 Fotoğraf çek / dosya seç
         <input type="file" accept="image/*,application/pdf" multiple hidden data-dosya>
       </label>
       <p class="aciklama" data-durum style="margin:8px 0 0"></p>
     </fieldset>`, (p) => {
+    p.dataset.belge = `${a.id}:${tur.id}`;
     const bul = (id) => liste.find((b) => b.id === id);
     p.querySelectorAll("[data-goster]").forEach((x) => (x.onclick = () => belgeGosterPenceresi(a, bul(x.dataset.goster))));
     p.querySelectorAll("[data-indir]").forEach((x) => (x.onclick = () => belgeIndir(a, bul(x.dataset.indir))));
@@ -999,43 +1046,69 @@ function belgeTurPenceresi(a, turId) {
       kaydet([{ op: "sil", koleksiyon: "belgeler", id: b.id }], "Belge silindi", () =>
         kaydet([{ op: "kaydet", koleksiyon: "belgeler", oge: { id: b.id, silindi: false } }], "Geri alındı"));
     }));
-    // Küçük resimler sırayla gelsin
+    p.querySelector("[data-tekrar]")?.addEventListener("click", async () => {
+      if (await belgeKayitlariniYaz()) yenidenAc();
+    });
+    // Küçük resimler sırayla gelsin, pencere kapanınca dursun
     (async () => {
       for (const img of p.querySelectorAll("[data-kucuk]")) {
-        try { const v = await belgeVerisi(bul(img.dataset.kucuk)); if (img.isConnected) img.src = v; } catch {}
+        if (!p.isConnected) break;
+        try { const v = await kucukResim(bul(img.dataset.kucuk)); if (img.isConnected) img.src = v; } catch {}
       }
     })();
     const durumYazi = p.querySelector("[data-durum]");
+    const secici = p.querySelector("[data-sec]");
+    // Yükleme bitince bu türün penceresi hâlâ açıksa (ya da yeniden açıldıysa) listeyi tazele
+    const yenidenAc = () => {
+      const acik = document.querySelector("#tabaka:not([hidden]) .pencere");
+      if (acik?.dataset.belge === `${a.id}:${tur.id}`) belgeTurPenceresi(a, tur.id);
+    };
     p.querySelector("[data-dosya]").onchange = async (e) => {
       const dosyalar = [...e.target.files];
       e.target.value = "";
+      if (!dosyalar.length) return;
+      e.target.disabled = true; // yükleme bitmeden ikinci seçim olmasın
+      secici.classList.add("kilitli");
       const etiket = p.querySelector("[data-etiket]").value.trim();
-      const yeniler = [];
+      let yuklenen = 0;
       for (const [i, dosya] of dosyalar.entries()) {
-        durumYazi.textContent = `Yükleniyor… (${i + 1}/${dosyalar.length})`;
+        durumYazi.textContent = `Yükleniyor… (${i + 1}/${dosyalar.length}) Lütfen bekle.`;
         try {
-          let veri, tip;
-          if (dosya.type === "application/pdf") {
-            if (dosya.size > 4_000_000) throw new Error("PDF 4 MB'tan büyük, yüklenemedi");
-            veri = await new Promise((ok, hata) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => hata(new Error("Dosya okunamadı")); r.readAsDataURL(dosya); });
+          const pdfMi = dosya.type === "application/pdf" || /\.pdf$/i.test(dosya.name);
+          const id = yeniId();
+          let veri, tip, kucukVar = false;
+          if (pdfMi) {
+            if (dosya.size > PDF_SINIR) throw new Error("PDF 3,5 MB'tan büyük. Sayfaların fotoğrafını çekip yükleyebilirsin.");
+            veri = (await dosyaOku(dosya)).replace(/^data:[^;]*;/, "data:application/pdf;");
             tip = "application/pdf";
           } else {
-            veri = await resimKucult(dosya, 2200, 0.88); // belge yazıları okunabilsin
+            const { buyuk, kucuk } = await belgeResmi(dosya);
+            veri = buyuk;
             tip = "image/jpeg";
+            await api("belge", { id: id + "k", veri: kucuk }, 30000);
+            belgeOnbellek.set(id + "k", Promise.resolve(kucuk));
+            kucukVar = true;
           }
-          const id = yeniId();
-          await api("belge", { id, veri }, 60000);
-          belgeOnbellek.set(id, veri);
-          yeniler.push({ id, aracId: a.id, tur: tur.id, ad: etiket ? (dosyalar.length > 1 ? `${etiket} ${i + 1}` : etiket) : null, tarih: bugunISO(), dosya: tip, boyut: dosya.size, kim });
+          await api("belge", { id, veri }, 90000);
+          bekleyenBelgeler.push({
+            id, aracId: a.id, tur: tur.id, ad: etiket ? (dosyalar.length > 1 ? `${etiket} ${i + 1}` : etiket) : null,
+            tarih: bugunISO(), dosya: tip, boyut: Math.round(veri.length * 0.75), kucuk: kucukVar, kim,
+          });
+          yuklenen++;
         } catch (hata) {
           bilgi(hata.message);
         }
       }
-      if (!yeniler.length) { durumYazi.textContent = ""; return; }
-      const tamam = await kaydet(yeniler.map((oge) => ({ op: "kaydet", koleksiyon: "belgeler", oge })), `${yeniler.length} belge yüklendi`, null, false);
-      if (tamam && p.isConnected) belgeTurPenceresi(a, tur.id);
+      const tamam = yuklenen ? await belgeKayitlariniYaz() : true;
+      if (p.isConnected) {
+        e.target.disabled = false;
+        secici.classList.remove("kilitli");
+        durumYazi.textContent = tamam ? "" : "Dosyalar yüklendi ama listeye eklenemedi. Aşağıdaki düğmeyle tekrar dene.";
+      }
+      if (yuklenen) yenidenAc();
     };
   });
+  return p;
 }
 
 function cozulduPenceresi(a, k) {
