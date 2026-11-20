@@ -1,6 +1,6 @@
 // Ortak hesaplar: hem telefondaki app hem sunucudaki sabah bildirimi bunu kullanır.
 
-export const KOLEKSIYONLAR = ["araclar", "kalemler", "kayitlar", "kmKayitlari"];
+export const KOLEKSIYONLAR = ["araclar", "kalemler", "kayitlar", "kmKayitlari", "belgeler"];
 
 const AYLAR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
 

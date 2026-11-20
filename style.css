@@ -251,3 +251,19 @@ legend { font-weight: 800; font-size: 15px; color: var(--soluk); padding: 0 6px;
 .km-kart .dugme { white-space: nowrap; flex: none; }
 .km-kart { flex-wrap: wrap; }
 .km-kart > div { min-width: 0; }
+
+/* Belgeler */
+.belge-ikon { font-size: 28px; width: 40px; text-align: center; flex: none; }
+.satir-alt.belge-eksik { color: var(--turuncu-yazi); font-weight: 700; }
+.belge-liste { display: grid; gap: 12px; margin: 6px 0 4px; }
+.belge-oge { display: flex; gap: 12px; align-items: flex-start; border: 2px solid var(--cizgi); border-radius: 16px; padding: 10px; }
+.belge-onizleme { flex: none; width: 92px; height: 92px; border: 0; border-radius: 12px; background: var(--zemin); display: grid; place-items: center; font-size: 40px; overflow: hidden; padding: 0; }
+.belge-onizleme img { width: 100%; height: 100%; object-fit: cover; }
+.belge-bilgi { flex: 1; min-width: 0; }
+.belge-bilgi b { display: block; font-size: 18px; overflow-wrap: anywhere; }
+.belge-bilgi span { display: block; font-size: 15px; color: var(--soluk); margin-top: 2px; }
+.belge-dugmeler { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+.belge-dugmeler .dugme { min-height: 44px; padding: 8px 14px; font-size: 16px; }
+.belge-dugmeler .metin-dugme.sil { width: auto; padding: 8px 6px; color: var(--kirmizi); font-size: 16px; }
+.belge-buyuk img { width: 100%; border-radius: 12px; display: block; background: var(--zemin); }
+.pdf-kutu { text-align: center; font-size: 22px; font-weight: 800; padding: 30px 10px; background: var(--zemin); border-radius: 14px; }

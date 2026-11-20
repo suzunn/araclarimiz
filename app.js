@@ -227,6 +227,7 @@ function ciz() {
   kok.querySelectorAll("[data-coz]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); cozulduPenceresi(a, bul(b.dataset.coz)); }));
   kok.querySelectorAll("[data-gir]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); eksikGirPenceresi(a, bul(b.dataset.gir)); }));
   kok.querySelectorAll("[data-kayit]").forEach((b) => (b.onclick = () => kayitPenceresi(a, b.dataset.kayit)));
+  kok.querySelectorAll("[data-belge-tur]").forEach((b) => (b.onclick = () => belgeTurPenceresi(a, b.dataset.belgeTur)));
 }
 
 // Acil = gecikmiş kontrol + açık sorun (araç kartındaki kırmızı sayı)
@@ -335,6 +336,8 @@ function aracEkrani(a) {
       <h2>Bilgisi eksik (${eksik.length}) <small>bilen girsin</small></h2>
       ${eksik.map(({ k, d }) => isKarti("eksik", k, eksikSorusu(k, d), `<button class="is-dugme" data-gir="${esc(k.id)}">Gir</button>`)).join("")}
     </section>` : ""}
+
+    ${belgelerBolumu(a)}
 
     <section>
       <details class="kart katlanir" data-k="tamam">
@@ -686,7 +689,7 @@ function sorunPenceresi(a, k) {
 // ---------- fotoğraf / video ----------
 const zamanAsimi = (ms, mesaj) => new Promise((_, hata) => setTimeout(() => hata(new Error(mesaj)), ms));
 
-async function resimKucult(kaynak, enFazla = 1280) {
+async function resimKucult(kaynak, enFazla = 1280, kalite = 0.82) {
   let bmp = kaynak;
   if (kaynak instanceof Blob) {
     try {
@@ -703,7 +706,7 @@ async function resimKucult(kaynak, enFazla = 1280) {
   c.height = Math.round(h * oran);
   c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close?.();
-  return c.toDataURL("image/jpeg", 0.82);
+  return c.toDataURL("image/jpeg", kalite);
 }
 
 // Claude video okumuyor: videodan 3 kare alıp fotoğraf gibi gönderiyoruz
@@ -874,6 +877,163 @@ function arizaOnizlemePenceresi(a, ai, anlatim, fotolar) {
         b.textContent = "✓ Ekle, herkes görsün";
         bilgi(hata.message);
       }
+    };
+  });
+}
+
+// ---------- belgeler (ruhsat, poliçe, fatura…) ----------
+const BELGE_TURLERI = [
+  { id: "ruhsat", ad: "Ruhsat", ikon: "🪪", gerekli: true, ne: "Ön ve arka yüzünün fotoğrafı" },
+  { id: "trafik", ad: "Trafik sigortası poliçesi", ikon: "📄", gerekli: true, ne: "Poliçe PDF'i ya da fotoğrafı" },
+  { id: "kasko", ad: "Kasko poliçesi", ikon: "🛡️", gerekli: true, ne: "Poliçe PDF'i ya da fotoğrafı" },
+  { id: "muayene", ad: "Muayene raporu", ikon: "✅", gerekli: true, ne: "TÜVTÜRK raporu ya da e-Devlet çıktısı" },
+  { id: "fatura", ad: "Servis / bakım faturaları", ikon: "🧾", ne: "Her bakımın faturası" },
+  { id: "garanti", ad: "Garanti belgeleri", ikon: "📜", ne: "Akü, lastik vb." },
+  { id: "diger", ad: "Diğer belgeler", ikon: "📎", ne: "Satış sözleşmesi, ekspertiz, ceza makbuzu…" },
+];
+const belgeOnbellek = new Map();
+
+const aracBelgeleri = (aracId, tur) =>
+  aktifler(durum.belgeler).filter((b) => b.aracId === aracId && (!tur || b.tur === tur)).sort((x, y) => (y.tarih || "").localeCompare(x.tarih || ""));
+
+function belgelerBolumu(a) {
+  const satirlar = BELGE_TURLERI.map((t) => {
+    const liste = aracBelgeleri(a.id, t.id);
+    const eksik = t.gerekli && !liste.length;
+    return { t, liste, eksik };
+  });
+  const eksikSayi = satirlar.filter((s) => s.eksik).length;
+  return `<section>
+    <h2>📁 Belgeler ${eksikSayi ? `<small>${eksikSayi} belge yüklenmedi</small>` : ""}</h2>
+    <ul class="liste kart">${satirlar.map(({ t, liste, eksik }) => `<li>
+      <button class="satir" data-belge-tur="${t.id}">
+        <span class="belge-ikon">${t.ikon}</span>
+        <span class="satir-govde"><span class="satir-baslik">${esc(t.ad)}</span>
+        <span class="satir-alt ${eksik ? "belge-eksik" : ""}">${liste.length ? `${liste.length} dosya · ${esc(tarihYaz(liste[0].tarih))}` : eksik ? "Yüklenmedi · dokun, yükle" : "Henüz yok"}</span></span>${SIMGE.ok}
+      </button></li>`).join("")}</ul>
+  </section>`;
+}
+
+async function belgeVerisi(b) {
+  if (!belgeOnbellek.has(b.id)) belgeOnbellek.set(b.id, (await api("belge?id=" + encodeURIComponent(b.id), null, 45000)).veri);
+  return belgeOnbellek.get(b.id);
+}
+
+function belgeDosyaAdi(a, b) {
+  const tur = BELGE_TURLERI.find((t) => t.id === b.tur);
+  const temiz = (s) => String(s || "").replace(/[^\p{L}\p{N} _-]/gu, "").trim().replace(/\s+/g, "-");
+  return `${temiz(a.ad)}-${temiz(b.ad || tur?.ad || "belge")}-${b.tarih || ""}.${b.dosya === "application/pdf" ? "pdf" : "jpg"}`;
+}
+
+async function belgeIndir(a, b) {
+  try {
+    bilgi("İndiriliyor…");
+    const blob = await (await fetch(await belgeVerisi(b))).blob();
+    const url = URL.createObjectURL(blob);
+    const link = Object.assign(document.createElement("a"), { href: url, download: belgeDosyaAdi(a, b) });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    bilgi("İndirildi: telefonun İndirilenler klasöründe");
+  } catch (e) {
+    bilgi(e.message);
+  }
+}
+
+function belgeGosterPenceresi(a, b) {
+  const tur = BELGE_TURLERI.find((t) => t.id === b.tur);
+  pencere(b.ad || tur?.ad || "Belge", `
+    <p class="aciklama">${esc([tarihYaz(b.tarih), b.kim].filter(Boolean).join(" · "))}</p>
+    <div class="belge-buyuk" data-gorunum><p class="aciklama">Yükleniyor…</p></div>
+    <button class="dugme buyuk genis" data-indir style="margin-top:12px">⬇ Telefona indir</button>
+    <button class="dugme ikincil genis" data-geri style="margin-top:10px">Geri</button>`, async (p) => {
+    p.querySelector("[data-indir]").onclick = () => belgeIndir(a, b);
+    p.querySelector("[data-geri]").onclick = () => belgeTurPenceresi(a, b.tur);
+    try {
+      const veri = await belgeVerisi(b);
+      const kutu = p.querySelector("[data-gorunum]");
+      if (!kutu?.isConnected) return;
+      if (b.dosya === "application/pdf") {
+        kutu.innerHTML = `<div class="pdf-kutu">📄 PDF belgesi<br><button class="dugme ikincil" data-ac style="margin-top:12px">Aç</button></div>`;
+        kutu.querySelector("[data-ac]").onclick = async () => {
+          const url = URL.createObjectURL(await (await fetch(veri)).blob());
+          window.open(url, "_blank") || belgeIndir(a, b);
+        };
+      } else {
+        kutu.innerHTML = "";
+        const img = new Image();
+        img.alt = b.ad || "Belge";
+        img.src = veri;
+        kutu.append(img);
+      }
+    } catch (e) {
+      bilgi(e.message);
+    }
+  });
+}
+
+function belgeTurPenceresi(a, turId) {
+  const tur = BELGE_TURLERI.find((t) => t.id === turId) || BELGE_TURLERI.at(-1);
+  const liste = aracBelgeleri(a.id, tur.id);
+  pencere(`${a.ad}: ${tur.ad}`, `
+    <p class="aciklama">${esc(tur.ne)}</p>
+    <div class="belge-liste">${liste.map((b) => `<div class="belge-oge">
+      <button class="belge-onizleme" data-goster="${esc(b.id)}" aria-label="Göster">${b.dosya === "application/pdf" ? "📄" : `<img alt="" data-kucuk="${esc(b.id)}">`}</button>
+      <div class="belge-bilgi"><b>${esc(b.ad || tur.ad)}</b><span>${esc([tarihYaz(b.tarih), b.kim].filter(Boolean).join(" · "))}</span>
+        <div class="belge-dugmeler"><button class="dugme ikincil" data-goster="${esc(b.id)}">Göster</button><button class="dugme ikincil" data-indir="${esc(b.id)}">⬇ İndir</button><button class="metin-dugme sil" data-sil="${esc(b.id)}">Sil</button></div>
+      </div></div>`).join("") || '<p class="aciklama">Henüz yüklenmedi.</p>'}</div>
+    <fieldset><legend>Yeni yükle</legend>
+      ${alan('Ne yüklüyorsun? <small>(isteğe bağlı)</small>', "etiket", "", `placeholder="ör. ${tur.id === "ruhsat" ? "Ruhsat ön yüz" : tur.ad + " 2026"}" data-etiket`)}
+      <label class="dugme buyuk genis dosya-dugme" style="margin-top:12px">📷 Fotoğraf çek / dosya seç
+        <input type="file" accept="image/*,application/pdf" multiple hidden data-dosya>
+      </label>
+      <p class="aciklama" data-durum style="margin:8px 0 0"></p>
+    </fieldset>`, (p) => {
+    const bul = (id) => liste.find((b) => b.id === id);
+    p.querySelectorAll("[data-goster]").forEach((x) => (x.onclick = () => belgeGosterPenceresi(a, bul(x.dataset.goster))));
+    p.querySelectorAll("[data-indir]").forEach((x) => (x.onclick = () => belgeIndir(a, bul(x.dataset.indir))));
+    p.querySelectorAll("[data-sil]").forEach((x) => (x.onclick = () => {
+      const b = bul(x.dataset.sil);
+      if (!confirm(`"${b.ad || tur.ad}" silinsin mi?`)) return;
+      kaydet([{ op: "sil", koleksiyon: "belgeler", id: b.id }], "Belge silindi", () =>
+        kaydet([{ op: "kaydet", koleksiyon: "belgeler", oge: { id: b.id, silindi: false } }], "Geri alındı"));
+    }));
+    // Küçük resimler sırayla gelsin
+    (async () => {
+      for (const img of p.querySelectorAll("[data-kucuk]")) {
+        try { const v = await belgeVerisi(bul(img.dataset.kucuk)); if (img.isConnected) img.src = v; } catch {}
+      }
+    })();
+    const durumYazi = p.querySelector("[data-durum]");
+    p.querySelector("[data-dosya]").onchange = async (e) => {
+      const dosyalar = [...e.target.files];
+      e.target.value = "";
+      const etiket = p.querySelector("[data-etiket]").value.trim();
+      const yeniler = [];
+      for (const [i, dosya] of dosyalar.entries()) {
+        durumYazi.textContent = `Yükleniyor… (${i + 1}/${dosyalar.length})`;
+        try {
+          let veri, tip;
+          if (dosya.type === "application/pdf") {
+            if (dosya.size > 4_000_000) throw new Error("PDF 4 MB'tan büyük, yüklenemedi");
+            veri = await new Promise((ok, hata) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => hata(new Error("Dosya okunamadı")); r.readAsDataURL(dosya); });
+            tip = "application/pdf";
+          } else {
+            veri = await resimKucult(dosya, 2200, 0.88); // belge yazıları okunabilsin
+            tip = "image/jpeg";
+          }
+          const id = yeniId();
+          await api("belge", { id, veri }, 60000);
+          belgeOnbellek.set(id, veri);
+          yeniler.push({ id, aracId: a.id, tur: tur.id, ad: etiket ? (dosyalar.length > 1 ? `${etiket} ${i + 1}` : etiket) : null, tarih: bugunISO(), dosya: tip, boyut: dosya.size, kim });
+        } catch (hata) {
+          bilgi(hata.message);
+        }
+      }
+      if (!yeniler.length) { durumYazi.textContent = ""; return; }
+      const tamam = await kaydet(yeniler.map((oge) => ({ op: "kaydet", koleksiyon: "belgeler", oge })), `${yeniler.length} belge yüklendi`, null, false);
+      if (tamam && p.isConnected) belgeTurPenceresi(a, tur.id);
     };
   });
 }
