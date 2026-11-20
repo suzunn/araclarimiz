@@ -191,7 +191,7 @@ function ciz() {
       ${liste.map((x) => {
         const acil = acilSayisi(x);
         return `<button class="arac-kart" role="tab" data-arac="${esc(x.id)}" aria-selected="${x.id === aktifArac}" aria-label="${esc(x.ad)}${acil ? `, ${acil} acil iş` : ""}">
-          ${x.foto ? `<img src="${esc(x.foto)}" alt="">` : `<span class="arac-ad">${esc(x.ad)}</span>`}
+          ${x.foto ? `<img src="${esc(x.foto)}" alt="">` : `<span class="arac-isim">${esc(x.ad)}</span>`}
           ${acil ? `<span class="rozet">${acil}</span>` : ""}
         </button>`;
       }).join("")}
@@ -298,7 +298,7 @@ function aracEkrani(a) {
 
   // Her iş bir kart: kartın kendisi ayrıntıyı açar, sağdaki büyük düğme işi bitirir
   const isKarti = (sinif, k, alt, dugme) => `<div class="is ${sinif}" data-kalem="${esc(k.id)}" role="button" tabindex="0">
-      <div class="is-govde"><div class="is-ad">${esc(k.ad)}</div><div class="is-alt">${esc(alt)}</div></div>
+      <div class="is-govde"><div class="is-baslik">${esc(k.ad)}</div><div class="is-alt">${esc(alt)}</div></div>
       ${dugme}
     </div>`;
   const acilVar = sorunlar.length || gecikti.length;
@@ -352,7 +352,7 @@ function aracEkrani(a) {
       <ul class="liste">
         ${gosterilen.map((k) => `<li>
           <button class="satir" data-kayit="${esc(k.id)}">
-            <span class="satir-govde"><span class="satir-ad">${esc(k.baslik || KAYIT_TURLERI[k.tur] || "Kayıt")}</span>
+            <span class="satir-govde"><span class="satir-baslik">${esc(k.baslik || KAYIT_TURLERI[k.tur] || "Kayıt")}</span>
             <span class="satir-alt">${esc([tarihYaz(k.tarih), k.km ? sayi(k.km) + " km" : "", k.kim].filter(Boolean).join(" · "))}</span></span>
             <span class="satir-sag">${k.tur === "yakit" && k.gidilenKm && k.litre ? esc(((k.litre / k.gidilenKm) * 100).toFixed(1).replace(".", ",") + " lt") : esc(tl(k.tutar))}</span>
           </button></li>`).join("") || '<li><p class="toplam">Henüz kayıt yok</p></li>'}
@@ -461,7 +461,7 @@ function kmPenceresi(a) {
     ${tarihAlani("Tarih", "tarih", bugunISO())}
     <button class="dugme genis" style="margin-top:16px">Kaydet</button>
     ${sonKmler.length ? `<h2 style="margin-top:22px">Son girilenler <small>(yanlışsa sil)</small></h2>
-    <ul class="liste kart">${sonKmler.map((k) => `<li><div class="satir"><span class="satir-govde"><span class="satir-ad">${sayi(k.km)} km</span>
+    <ul class="liste kart">${sonKmler.map((k) => `<li><div class="satir"><span class="satir-govde"><span class="satir-baslik">${sayi(k.km)} km</span>
       <span class="satir-alt">${esc([tarihYaz(k.tarih), k.kim].filter(Boolean).join(" · "))}</span></span>
       <button type="button" class="dugme tehlike" data-kmsil="${esc(k.id)}">Sil</button></div></li>`).join("")}</ul>` : ""}
   </form>`, (p) => {
